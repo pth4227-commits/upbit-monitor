@@ -1,4 +1,3 @@
-
 name: Upbit read-only hourly snapshot
 
 on:
@@ -9,27 +8,28 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: upbit-pages
+  cancel-in-progress: false
+
 jobs:
   monitor:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
       - name: Read public Upbit market data
         run: python monitor.py
-        
       - name: Analyze market risk and watchlist
         run: python analyze.py
-
-      - name: Upload snapshot and report
+      - name: Upload private run artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -37,3 +37,42 @@ jobs:
           path: output/
           retention-days: 7
           if-no-files-found: warn
+      - name: Prepare public market-only files
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          out = Path('output')
+          snapshot = json.loads((out / 'snapshot.json').read_text(encoding='utf-8'))
+          analysis = json.loads((out / 'analysis.json').read_text(encoding='utf-8'))
+          if not snapshot.get('complete') or snapshot.get('errors'):
+              raise SystemExit('Incomplete snapshot: public publication blocked')
+          if analysis.get('status') == 'DATA_UNVERIFIED':
+              raise SystemExit('Unverified analysis: public publication blocked')
+          # Publish only market data, never local secrets or personal holdings.
+          for row in snapshot.get('data', []):
+              row.pop('held_avg_krw', None)
+              row.pop('vs_held_avg_pct', None)
+          public = Path('public'); public.mkdir(exist_ok=True)
+          (public / 'snapshot.json').write_text(json.dumps(snapshot, ensure_ascii=False), encoding='utf-8')
+          (public / 'analysis.json').write_text(json.dumps(analysis, ensure_ascii=False), encoding='utf-8')
+          (public / 'index.html').write_text('<!doctype html><meta charset="utf-8"><title>Upbit public market snapshot</title><p>Public market data only. Not financial advice.</p><p><a href="snapshot.json">snapshot.json</a> | <a href="analysis.json">analysis.json</a></p>', encoding='utf-8')
+          PY
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public/
+
+  deploy:
+    needs: monitor
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
