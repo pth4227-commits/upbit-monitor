@@ -25,6 +25,9 @@ jobs:
 
       - name: Read public Upbit market data
         run: python monitor.py
+        
+      - name: Analyze market risk and watchlist
+        run: python analyze.py
 
       - name: Upload snapshot and report
         if: always()
