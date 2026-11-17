@@ -3,7 +3,7 @@ name: Upbit read-only hourly snapshot
 on:
   workflow_dispatch:
   schedule:
-    - cron: '15 * * * *'
+    - cron: '*/15 * * * *'
 
 permissions:
   contents: read
